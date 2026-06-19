@@ -2,12 +2,12 @@
  * @file temporal/page.tsx  (rota "/temporal")
  * @description Análise Temporal — apuração de IBS/CBS agrupada por mês ou trimestre.
  *
- * ÍNDICES PERCENTUAIS (consistentes com a tela de Apuração RTC):
- *   Índice Crédito  = IBS/CBS creditados  ÷ volume total das entradas (INBOUND) do período
- *   Índice Débito   = IBS/CBS debitados   ÷ volume total das saídas  (OUTBOUND) do período
- *   Índice Saldo    = saldo líquido        ÷ volume total das saídas  (OUTBOUND) do período
- *
- * Raciocínio: "para cada R$ de saída, qual o peso líquido do IBS/CBS?"
+ * FUNCIONALIDADES:
+ *   - Toggle Mensal / Trimestral
+ *   - Gráfico de barras agrupadas (crédito + débito) com linha de saldo (eixo secundário)
+ *   - Gráfico de área para saldo acumulado progressivo
+ *   - Tabela de períodos com saldo acumulado
+ *   - Cards de destaque: melhor período, pior período e tendência
  */
 'use client'
 
@@ -17,58 +17,29 @@ import {
   Tooltip, Legend, ResponsiveContainer,
   AreaChart, Area, ReferenceLine,
 } from 'recharts'
-import { TrendingUp, TrendingDown, Minus, Calendar } from 'lucide-react'
-import { useFiscalStore }        from '@/application/store/useFiscalStore'
+import {
+  TrendingUp, TrendingDown, Minus, Calendar,
+} from 'lucide-react'
+import { useFiscalStore }          from '@/application/store/useFiscalStore'
 import {
   groupByPeriod, getTemporalHighlights,
   type PeriodMode, type PeriodData,
 } from '@/application/services/TaxAnalyzerService'
-import { EmptyState } from '@/components/ui/EmptyState'
-import { Card }       from '@/components/ui/Card'
-import { formatBRL }  from '@/lib/utils'
+import { EmptyState }  from '@/components/ui/EmptyState'
+import { Card }        from '@/components/ui/Card'
+import { formatBRL }   from '@/lib/utils'
 
 // ---------------------------------------------------------------------------
 // PALETA
 // ---------------------------------------------------------------------------
-const C_CREDIT    = '#059669'
-const C_DEBIT     = '#dc2626'
-const C_BALANCE   = '#1d4ed8'
+const C_CREDIT  = '#059669'
+const C_DEBIT   = '#dc2626'
+const C_BALANCE = '#1d4ed8'
 const C_ACCUM_POS = '#059669'
 const C_ACCUM_NEG = '#dc2626'
 
 // ---------------------------------------------------------------------------
-// UTILITÁRIOS
-// ---------------------------------------------------------------------------
-
-function fmtPct(value: number): string {
-  return `${value.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%`
-}
-
-/** IBS/CBS creditados ÷ volume INBOUND do período */
-function creditRate(p: PeriodData): number {
-  return p.inboundValue > 0 ? (p.credito / p.inboundValue) * 100 : 0
-}
-
-/** IBS/CBS debitados ÷ volume OUTBOUND do período */
-function debitRate(p: PeriodData): number {
-  return p.outboundValue > 0 ? (p.debito / p.outboundValue) * 100 : 0
-}
-
-/** Saldo líquido ÷ volume OUTBOUND do período — peso real do IBS/CBS sobre cada R$ vendido */
-function balanceRate(p: PeriodData): number {
-  return p.outboundValue > 0 ? (p.saldo / p.outboundValue) * 100 : 0
-}
-
-function abbrBRL(value: number): string {
-  const abs = Math.abs(value)
-  const sign = value < 0 ? '-' : ''
-  if (abs >= 1_000_000) return `${sign}${(abs / 1_000_000).toFixed(1)}M`
-  if (abs >= 1_000)     return `${sign}${(abs / 1_000).toFixed(0)}k`
-  return `${sign}${abs.toFixed(0)}`
-}
-
-// ---------------------------------------------------------------------------
-// COMPONENTE PRINCIPAL
+// COMPONENTE
 // ---------------------------------------------------------------------------
 
 export default function TemporalPage() {
@@ -99,18 +70,9 @@ export default function TemporalPage() {
     )
   }
 
+  // Filtrar período "sem-data" dos gráficos (mantém na tabela)
   const chartData  = periods.filter(p => p.key !== 'sem-data')
-  const lastPeriod = periods[periods.length - 1]
-  const finalSaldo = lastPeriod?.saldoAcumulado ?? 0
-
-  // Totais consolidados para rodapé da tabela
-  const totCredito  = periods.reduce((s, p) => s + p.credito,       0)
-  const totDebito   = periods.reduce((s, p) => s + p.debito,        0)
-  const totInbound  = periods.reduce((s, p) => s + p.inboundValue,  0)
-  const totOutbound = periods.reduce((s, p) => s + p.outboundValue, 0)
-  // totSaldo e totDocs calculados abaixo
-  const totSaldo    = totCredito - totDebito
-  const totDocs     = periods.reduce((s, p) => s + p.docCount,      0)
+  const finalSaldo = periods[periods.length - 1]?.saldoAcumulado ?? 0
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
@@ -122,18 +84,14 @@ export default function TemporalPage() {
             Análise Temporal
           </h1>
           <p style={{ fontSize: '0.82rem', color: 'var(--color-text-muted)' }}>
-            {chartData.length} {mode === 'monthly' ? 'meses' : 'trimestres'} •{' '}
+            {periods.filter(p => p.key !== 'sem-data').length} {mode === 'monthly' ? 'meses' : 'trimestres'} •{' '}
             {documents.length.toLocaleString('pt-BR')} documentos
             {cnpjRoot && <span> • CNPJ raiz {cnpjRoot}</span>}
           </p>
         </div>
 
-        {/* Toggle mensal / trimestral */}
-        <div style={{
-          display: 'flex', background: 'var(--color-bg)',
-          border: '1px solid var(--color-border)',
-          borderRadius: 'var(--radius-md)', padding: '3px', gap: '2px',
-        }}>
+        {/* Toggle mensal/trimestral */}
+        <div style={{ display: 'flex', background: 'var(--color-bg)', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-md)', padding: '3px', gap: '2px' }}>
           {(['monthly', 'quarterly'] as PeriodMode[]).map(m => (
             <button
               key={m}
@@ -160,22 +118,22 @@ export default function TemporalPage() {
           title="Melhor Período"
           period={highlights.best}
           icon={<TrendingUp size={17} color={C_CREDIT} />}
-          labelColor={C_CREDIT}
+          color={C_CREDIT}
         />
         <HighlightCard
           title="Pior Período"
           period={highlights.worst}
           icon={<TrendingDown size={17} color={C_DEBIT} />}
-          labelColor={C_DEBIT}
-          invertSign
+          color={C_DEBIT}
+          invertColor
         />
         <TrendCard highlights={highlights} finalSaldo={finalSaldo} />
       </div>
 
       {/* ─── GRÁFICO 1: Crédito, Débito e Saldo por período ─── */}
       <Card
-        title={`Crédito, Débito e Saldo — por ${mode === 'monthly' ? 'Mês' : 'Trimestre'}`}
-        subtitle="Barras = volume IBS/CBS (R$) • Linha = saldo do período (eixo direito)"
+        title={`Crédito, Débito e Saldo por ${mode === 'monthly' ? 'Mês' : 'Trimestre'}`}
+        subtitle="Barras = IBS/CBS creditado e debitado (R$) • Linha = saldo do período (eixo direito)"
       >
         <ResponsiveContainer width="100%" height={300}>
           <ComposedChart data={chartData} margin={{ top: 4, right: 60, left: 10, bottom: 4 }}>
@@ -185,12 +143,27 @@ export default function TemporalPage() {
               tick={{ fontSize: 11, fill: 'var(--color-text-muted)' }}
               interval={chartData.length > 18 ? Math.floor(chartData.length / 12) : 0}
             />
-            <YAxis yAxisId="left"  tick={{ fontSize: 10, fill: 'var(--color-text-muted)' }} tickFormatter={v => abbrBRL(v)} width={64} />
-            <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 10, fill: C_BALANCE }} tickFormatter={v => abbrBRL(v)} width={64} />
+            {/* Eixo esquerdo: crédito e débito */}
+            <YAxis
+              yAxisId="left"
+              tick={{ fontSize: 10, fill: 'var(--color-text-muted)' }}
+              tickFormatter={v => abbrBRL(v)}
+              width={64}
+            />
+            {/* Eixo direito: saldo */}
+            <YAxis
+              yAxisId="right"
+              orientation="right"
+              tick={{ fontSize: 10, fill: C_BALANCE }}
+              tickFormatter={v => abbrBRL(v)}
+              width={64}
+            />
             <Tooltip
               formatter={(v, name) => {
-                const labels: Record<string, string> = { credito: 'Crédito', debito: 'Débito', saldo: 'Saldo' }
-                return [formatBRL(Number(v)), (labels as Record<string, string>)[String(name)] ?? String(name)]
+                const labels: Record<string, string> = {
+                  credito: 'Crédito', debito: 'Débito', saldo: 'Saldo',
+                }
+                return [formatBRL(Number(v)), labels[String(name)] ?? String(name)]
               }}
               contentStyle={{ fontSize: '0.8rem', border: '1px solid var(--color-border)', borderRadius: '6px' }}
             />
@@ -201,7 +174,11 @@ export default function TemporalPage() {
             <ReferenceLine yAxisId="right" y={0} stroke={C_BALANCE} strokeDasharray="4 2" strokeOpacity={0.4} />
             <Bar yAxisId="left" dataKey="credito" name="credito" fill={C_CREDIT} radius={[3, 3, 0, 0]} maxBarSize={28} />
             <Bar yAxisId="left" dataKey="debito"  name="debito"  fill={C_DEBIT}  radius={[3, 3, 0, 0]} maxBarSize={28} />
-            <Line yAxisId="right" dataKey="saldo" name="saldo" stroke={C_BALANCE} strokeWidth={2} dot={{ r: 3, fill: C_BALANCE }} type="monotone" />
+            <Line
+              yAxisId="right" dataKey="saldo" name="saldo"
+              stroke={C_BALANCE} strokeWidth={2} dot={{ r: 3, fill: C_BALANCE }}
+              type="monotone"
+            />
           </ComposedChart>
         </ResponsiveContainer>
       </Card>
@@ -229,7 +206,11 @@ export default function TemporalPage() {
               tick={{ fontSize: 11, fill: 'var(--color-text-muted)' }}
               interval={chartData.length > 18 ? Math.floor(chartData.length / 12) : 0}
             />
-            <YAxis tick={{ fontSize: 10, fill: 'var(--color-text-muted)' }} tickFormatter={v => abbrBRL(v)} width={64} />
+            <YAxis
+              tick={{ fontSize: 10, fill: 'var(--color-text-muted)' }}
+              tickFormatter={v => abbrBRL(v)}
+              width={64}
+            />
             <Tooltip
               formatter={(v) => [formatBRL(Number(v)), 'Saldo Acumulado']}
               contentStyle={{ fontSize: '0.8rem', border: '1px solid var(--color-border)', borderRadius: '6px' }}
@@ -247,10 +228,10 @@ export default function TemporalPage() {
         </ResponsiveContainer>
       </Card>
 
-      {/* ─── TABELA DE PERÍODOS COM ÍNDICES ─── */}
+      {/* ─── TABELA DE PERÍODOS ─── */}
       <Card
-        title={`Detalhe por ${mode === 'monthly' ? 'Mês' : 'Trimestre'} — com Índices %`}
-        subtitle="Índice Crédito = IBS/CBS crédito ÷ entradas • Índice Débito e Saldo = IBS/CBS ÷ saídas"
+        title={`Detalhe por ${mode === 'monthly' ? 'Mês' : 'Trimestre'}`}
+        subtitle="Saldo acumulado = posição progressiva desde o primeiro período"
         noPadding
       >
         <div style={{ overflowX: 'auto' }}>
@@ -258,65 +239,48 @@ export default function TemporalPage() {
             <thead>
               <tr>
                 <th>Período</th>
-                <th style={{ textAlign: 'right' }}>Docs</th>
-                <th style={{ textAlign: 'right' }}>Entradas</th>
-                <th style={{ textAlign: 'right' }}>Saídas</th>
-                <th style={{ textAlign: 'right' }}>
-                  Crédito IBS/CBS
-                  <div style={{ fontSize: '0.65rem', fontWeight: 400, color: 'var(--color-text-muted)', marginTop: '1px' }}>
-                    % das entradas
-                  </div>
-                </th>
-                <th style={{ textAlign: 'right' }}>
-                  Débito IBS/CBS
-                  <div style={{ fontSize: '0.65rem', fontWeight: 400, color: 'var(--color-text-muted)', marginTop: '1px' }}>
-                    % das saídas
-                  </div>
-                </th>
-                <th style={{ textAlign: 'right' }}>
-                  Saldo
-                  <div style={{ fontSize: '0.65rem', fontWeight: 400, color: 'var(--color-text-muted)', marginTop: '1px' }}>
-                    % das saídas
-                  </div>
-                </th>
+                <th style={{ textAlign: 'right' }}>Documentos</th>
+                <th style={{ textAlign: 'right' }}>Com IBS/CBS</th>
+                <th style={{ textAlign: 'right' }}>Volume</th>
+                <th style={{ textAlign: 'right' }}>Crédito</th>
+                <th style={{ textAlign: 'right' }}>Débito</th>
+                <th style={{ textAlign: 'right' }}>Saldo do Período</th>
                 <th style={{ textAlign: 'right' }}>Saldo Acumulado</th>
               </tr>
             </thead>
             <tbody>
-              {periods.map(p => <PeriodRow key={p.key} period={p} />)}
+              {periods.map((p) => (
+                <PeriodRow key={p.key} period={p} />
+              ))}
             </tbody>
-
-            {/* Totais consolidados */}
+            {/* Totais */}
             <tfoot>
-              <tr style={{ background: 'var(--color-bg)' }}>
-                <td style={{ padding: '10px 14px', fontSize: '0.82rem', fontWeight: 700 }}>TOTAL</td>
-                <td style={{ padding: '10px 14px', textAlign: 'right', fontFamily: 'var(--font-data)', fontSize: '0.82rem', fontWeight: 700 }}>
-                  {totDocs.toLocaleString('pt-BR')}
+              <tr style={{ background: 'var(--color-bg)', fontWeight: 700 }}>
+                <td style={{ padding: '10px 14px', fontSize: '0.82rem' }}>TOTAL</td>
+                <td style={{ padding: '10px 14px', textAlign: 'right', fontFamily: 'var(--font-data)', fontSize: '0.82rem' }}>
+                  {periods.reduce((s, p) => s + p.docCount, 0).toLocaleString('pt-BR')}
+                </td>
+                <td style={{ padding: '10px 14px', textAlign: 'right', fontFamily: 'var(--font-data)', fontSize: '0.82rem', color: C_CREDIT }}>
+                  {periods.reduce((s, p) => s + p.docsComIBS, 0).toLocaleString('pt-BR')}
                 </td>
                 <td style={{ padding: '10px 14px', textAlign: 'right', fontFamily: 'var(--font-data)', fontSize: '0.82rem' }}>
-                  {formatBRL(totInbound)}
+                  {formatBRL(periods.reduce((s, p) => s + p.totalValue, 0))}
                 </td>
-                <td style={{ padding: '10px 14px', textAlign: 'right', fontFamily: 'var(--font-data)', fontSize: '0.82rem' }}>
-                  {formatBRL(totOutbound)}
+                <td style={{ padding: '10px 14px', textAlign: 'right', fontFamily: 'var(--font-data)', fontSize: '0.82rem', color: C_CREDIT, fontWeight: 700 }}>
+                  {formatBRL(periods.reduce((s, p) => s + p.credito, 0))}
                 </td>
-                <TotalPctCell value={totCredito} base={totInbound} color={C_CREDIT} />
-                <TotalPctCell value={totDebito}  base={totOutbound} color={C_DEBIT} />
-                <TotalPctCell value={totSaldo}   base={totOutbound} color={totSaldo >= 0 ? C_CREDIT : C_DEBIT} signed />
-                <td style={{ padding: '10px 14px', textAlign: 'right', fontFamily: 'var(--font-data)', fontSize: '0.82rem', fontWeight: 700, color: finalSaldo >= 0 ? C_CREDIT : C_DEBIT }}>
+                <td style={{ padding: '10px 14px', textAlign: 'right', fontFamily: 'var(--font-data)', fontSize: '0.82rem', color: C_DEBIT, fontWeight: 700 }}>
+                  {formatBRL(periods.reduce((s, p) => s + p.debito, 0))}
+                </td>
+                <td style={{ padding: '10px 14px', textAlign: 'right', fontFamily: 'var(--font-data)', fontSize: '0.82rem', color: finalSaldo >= 0 ? C_CREDIT : C_DEBIT, fontWeight: 700 }}>
+                  {formatBRL(Math.abs(finalSaldo))}
+                </td>
+                <td style={{ padding: '10px 14px', textAlign: 'right', fontFamily: 'var(--font-data)', fontSize: '0.82rem', color: finalSaldo >= 0 ? C_CREDIT : C_DEBIT, fontWeight: 700 }}>
                   {finalSaldo >= 0 ? 'Credor' : 'Devedor'}
                 </td>
               </tr>
             </tfoot>
           </table>
-        </div>
-
-        {/* Legenda dos índices */}
-        <div style={{ padding: '10px 16px 12px', borderTop: '1px solid var(--color-border)', background: 'var(--color-bg)' }}>
-          <p style={{ fontSize: '0.72rem', color: 'var(--color-text-muted)', lineHeight: 1.6 }}>
-            <strong>Índice Crédito %</strong>: IBS/CBS creditado ÷ total das entradas do período &nbsp;•&nbsp;
-            <strong>Índice Débito %</strong>: IBS/CBS debitado ÷ total das saídas &nbsp;•&nbsp;
-            <strong>Índice Saldo %</strong>: saldo líquido ÷ total das saídas — para cada R$ vendido, qual o peso líquido do IBS/CBS
-          </p>
         </div>
       </Card>
     </div>
@@ -324,76 +288,42 @@ export default function TemporalPage() {
 }
 
 // ---------------------------------------------------------------------------
-// LINHA DA TABELA
+// SUB-COMPONENTES
 // ---------------------------------------------------------------------------
 
 function PeriodRow({ period: p }: { period: PeriodData }) {
-  const isNoDate = p.key === 'sem-data'
-  const saldoPos = p.saldo >= 0
-  const accumPos = p.saldoAcumulado >= 0
-  const cr = creditRate(p)
-  const dr = debitRate(p)
-  const br = balanceRate(p)
+  const isNoDate  = p.key === 'sem-data'
+  const saldoPos  = p.saldo >= 0
+  const accumPos  = p.saldoAcumulado >= 0
 
   return (
     <tr style={{ opacity: isNoDate ? 0.6 : 1 }}>
       <td style={{ fontWeight: 600, fontSize: '0.85rem' }}>{p.label}</td>
-
       <td style={{ textAlign: 'right', fontFamily: 'var(--font-data)', fontSize: '0.82rem' }}>
         {p.docCount.toLocaleString('pt-BR')}
-        {p.docsComIBS > 0 && (
-          <div style={{ fontSize: '0.68rem', color: C_CREDIT }}>
-            {p.docsComIBS} c/ IBS
-          </div>
-        )}
       </td>
-
+      <td style={{ textAlign: 'right', fontFamily: 'var(--font-data)', fontSize: '0.82rem', color: p.docsComIBS > 0 ? C_CREDIT : 'var(--color-text-muted)' }}>
+        {p.docsComIBS > 0 ? p.docsComIBS.toLocaleString('pt-BR') : '—'}
+      </td>
       <td style={{ textAlign: 'right', fontFamily: 'var(--font-data)', fontSize: '0.82rem', color: 'var(--color-text-secondary)' }}>
-        {p.inboundValue > 0 ? formatBRL(p.inboundValue) : '—'}
+        {formatBRL(p.totalValue)}
       </td>
-
-      <td style={{ textAlign: 'right', fontFamily: 'var(--font-data)', fontSize: '0.82rem', color: 'var(--color-text-secondary)' }}>
-        {p.outboundValue > 0 ? formatBRL(p.outboundValue) : '—'}
+      <td style={{ textAlign: 'right', fontFamily: 'var(--font-data)', fontSize: '0.82rem', color: p.credito > 0 ? C_CREDIT : 'var(--color-text-muted)', fontWeight: p.credito > 0 ? 600 : 400 }}>
+        {p.credito > 0 ? formatBRL(p.credito) : '—'}
       </td>
-
-      {/* Crédito + índice */}
-      <td style={{ textAlign: 'right', fontFamily: 'var(--font-data)', fontSize: '0.82rem' }}>
-        {p.credito > 0 ? (
-          <>
-            <span style={{ color: C_CREDIT, fontWeight: 600 }}>{formatBRL(p.credito)}</span>
-            <div style={{ fontSize: '0.72rem', color: C_CREDIT, opacity: 0.8 }}>{fmtPct(cr)}</div>
-          </>
-        ) : <span style={{ color: 'var(--color-text-muted)' }}>—</span>}
+      <td style={{ textAlign: 'right', fontFamily: 'var(--font-data)', fontSize: '0.82rem', color: p.debito > 0 ? C_DEBIT : 'var(--color-text-muted)', fontWeight: p.debito > 0 ? 600 : 400 }}>
+        {p.debito > 0 ? formatBRL(p.debito) : '—'}
       </td>
-
-      {/* Débito + índice */}
-      <td style={{ textAlign: 'right', fontFamily: 'var(--font-data)', fontSize: '0.82rem' }}>
-        {p.debito > 0 ? (
-          <>
-            <span style={{ color: C_DEBIT, fontWeight: 600 }}>{formatBRL(p.debito)}</span>
-            <div style={{ fontSize: '0.72rem', color: C_DEBIT, opacity: 0.8 }}>{fmtPct(dr)}</div>
-          </>
-        ) : <span style={{ color: 'var(--color-text-muted)' }}>—</span>}
-      </td>
-
-      {/* Saldo do período + índice */}
-      <td style={{ textAlign: 'right', fontFamily: 'var(--font-data)', fontSize: '0.82rem' }}>
-        <span style={{ color: saldoPos ? C_CREDIT : C_DEBIT, fontWeight: 600 }}>
+      <td style={{ textAlign: 'right', fontFamily: 'var(--font-data)', fontSize: '0.82rem', fontWeight: 600 }}>
+        <span style={{ color: saldoPos ? C_CREDIT : C_DEBIT }}>
           {saldoPos ? '+' : '−'}{formatBRL(Math.abs(p.saldo))}
         </span>
-        {p.outboundValue > 0 && (
-          <div style={{ fontSize: '0.72rem', color: saldoPos ? C_CREDIT : C_DEBIT, opacity: 0.8 }}>
-            {br >= 0 ? '+' : ''}{fmtPct(br)}
-          </div>
-        )}
       </td>
-
-      {/* Saldo acumulado */}
       <td style={{ textAlign: 'right', fontFamily: 'var(--font-data)', fontSize: '0.82rem', fontWeight: 700 }}>
         <span style={{
           display: 'inline-block', padding: '2px 8px', borderRadius: '4px',
           background: accumPos ? 'var(--color-credit-light)' : 'var(--color-debit-light)',
-          color:      accumPos ? 'var(--color-credit-text)'  : 'var(--color-debit-text)',
+          color: accumPos ? 'var(--color-credit-text)' : 'var(--color-debit-text)',
         }}>
           {accumPos ? '+' : '−'}{formatBRL(Math.abs(p.saldoAcumulado))}
         </span>
@@ -402,38 +332,11 @@ function PeriodRow({ period: p }: { period: PeriodData }) {
   )
 }
 
-// ---------------------------------------------------------------------------
-// CÉLULAS DE TOTAL NO RODAPÉ
-// ---------------------------------------------------------------------------
-
-function TotalPctCell({ value, base, color, signed }: {
-  value: number; base: number; color: string; signed?: boolean
-}) {
-  const pct = base > 0 ? (value / base) * 100 : 0
-  return (
-    <td style={{ padding: '10px 14px', textAlign: 'right', fontFamily: 'var(--font-data)', fontSize: '0.82rem' }}>
-      <span style={{ color, fontWeight: 700 }}>
-        {signed && value >= 0 ? '+' : signed && value < 0 ? '−' : ''}
-        {formatBRL(Math.abs(value))}
-      </span>
-      {base > 0 && (
-        <div style={{ fontSize: '0.72rem', color, opacity: 0.8, fontWeight: 600 }}>
-          {signed && pct >= 0 ? '+' : ''}{fmtPct(pct)}
-        </div>
-      )}
-    </td>
-  )
-}
-
-// ---------------------------------------------------------------------------
-// CARDS DE DESTAQUE
-// ---------------------------------------------------------------------------
-
 function HighlightCard({
-  title, period, icon, labelColor, invertSign,
+  title, period, icon, color, invertColor,
 }: {
   title: string; period: PeriodData | null; icon: React.ReactNode
-  labelColor: string; invertSign?: boolean
+  color: string; invertColor?: boolean
 }) {
   if (!period) {
     return (
@@ -447,11 +350,9 @@ function HighlightCard({
     )
   }
 
-  const saldoColor = invertSign
-    ? (period.saldo <= 0 ? C_DEBIT  : C_CREDIT)
+  const saldoColor = invertColor
+    ? (period.saldo < 0 ? C_DEBIT : C_CREDIT)
     : (period.saldo >= 0 ? C_CREDIT : C_DEBIT)
-
-  const br = balanceRate(period)
 
   return (
     <div className="kpi-card">
@@ -459,17 +360,12 @@ function HighlightCard({
         <p className="kpi-label">{title}</p>
         {icon}
       </div>
-      <p style={{ fontSize: '1rem', fontWeight: 700, color: labelColor, marginBottom: '4px' }}>{period.label}</p>
+      <p style={{ fontSize: '1rem', fontWeight: 700, color, marginBottom: '4px' }}>{period.label}</p>
       <p style={{ fontFamily: 'var(--font-data)', fontSize: '1.3rem', fontWeight: 600, color: saldoColor }}>
         {period.saldo >= 0 ? '+' : '−'}{formatBRL(Math.abs(period.saldo))}
       </p>
-      {period.outboundValue > 0 && (
-        <p style={{ fontFamily: 'var(--font-data)', fontSize: '0.82rem', color: saldoColor, opacity: 0.85, marginTop: '2px' }}>
-          {br >= 0 ? '+' : ''}{fmtPct(br)} das saídas
-        </p>
-      )}
-      <p style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', marginTop: '6px' }}>
-        {period.docCount} docs • Saídas: {formatBRL(period.outboundValue)}
+      <p style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', marginTop: '4px' }}>
+        {period.docCount} docs • Volume: {formatBRL(period.totalValue)}
       </p>
     </div>
   )
@@ -481,7 +377,7 @@ function TrendCard({ highlights, finalSaldo }: {
   const { trend, trendPct } = highlights
   const accumPos = finalSaldo >= 0
 
-  const cfg = {
+  const trendConfig = {
     up:           { icon: <TrendingUp  size={17} color={C_CREDIT} />, label: 'Tendência de Melhora',   color: C_CREDIT },
     down:         { icon: <TrendingDown size={17} color={C_DEBIT} />, label: 'Tendência de Piora',     color: C_DEBIT  },
     stable:       { icon: <Minus size={17} color="#64748b" />,        label: 'Tendência Estável',      color: '#64748b' },
@@ -492,22 +388,35 @@ function TrendCard({ highlights, finalSaldo }: {
     <div className="kpi-card">
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
         <p className="kpi-label">Posição Final + Tendência</p>
-        {cfg.icon}
+        {trendConfig.icon}
       </div>
+      {/* Saldo acumulado final */}
       <p style={{ fontFamily: 'var(--font-data)', fontSize: '1.3rem', fontWeight: 700, color: accumPos ? C_CREDIT : C_DEBIT, marginBottom: '4px' }}>
         {accumPos ? '+' : '−'}{formatBRL(Math.abs(finalSaldo))}
       </p>
       <p style={{ fontSize: '0.75rem', color: accumPos ? 'var(--color-credit-text)' : 'var(--color-debit-text)', fontWeight: 600, marginBottom: '8px' }}>
         {accumPos ? '▲ Posição Credora' : '▼ Posição Devedora'}
       </p>
+      {/* Tendência */}
       <div style={{ borderTop: '1px solid var(--color-border)', paddingTop: '8px' }}>
-        <p style={{ fontSize: '0.78rem', fontWeight: 600, color: cfg.color }}>{cfg.label}</p>
+        <p style={{ fontSize: '0.78rem', fontWeight: 600, color: trendConfig.color }}>{trendConfig.label}</p>
         {trend !== 'insufficient' && (
           <p style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', marginTop: '2px' }}>
-            Últimos 3 vs anteriores: {trendPct >= 0 ? '+' : ''}{trendPct.toFixed(1)}%
+            Últimos 3 períodos vs anteriores: {trendPct >= 0 ? '+' : ''}{trendPct.toFixed(1)}%
           </p>
         )}
       </div>
     </div>
   )
+}
+
+// ---------------------------------------------------------------------------
+// UTILITÁRIO — formata valor abreviado para eixos do gráfico
+// ---------------------------------------------------------------------------
+function abbrBRL(value: number): string {
+  const abs = Math.abs(value)
+  const sign = value < 0 ? '-' : ''
+  if (abs >= 1_000_000) return `${sign}${(abs / 1_000_000).toFixed(1)}M`
+  if (abs >= 1_000)     return `${sign}${(abs / 1_000).toFixed(0)}k`
+  return `${sign}${abs.toFixed(0)}`
 }
