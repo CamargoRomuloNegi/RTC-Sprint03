@@ -216,10 +216,13 @@ export default function AnalysisPage() {
               <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
               <XAxis dataKey="cfop" tick={{ fontSize: 11, fill: 'var(--color-text-muted)' }} />
               <YAxis tick={{ fontSize: 11, fill: 'var(--color-text-muted)' }} tickFormatter={v => formatBRL(v).replace('R$\u00a0', '')} />
-              <Tooltip content={<CfopTooltip />} />
+              <Tooltip
+                formatter={(v, n) => [formatBRL(Number(v)), n === 'credito' ? 'Crédito' : 'Débito'] as [string, string]}
+                contentStyle={{ fontSize: '0.8rem', border: '1px solid var(--color-border)', borderRadius: '6px' }}
+              />
               <Legend wrapperStyle={{ fontSize: '0.8rem' }} />
-              <Bar dataKey="credito" name="Crédito" fill={C_CREDIT} radius={[3, 3, 0, 0]} maxBarSize={28} />
-              <Bar dataKey="debito"  name="Débito"  fill={C_DEBIT}  radius={[3, 3, 0, 0]} maxBarSize={28} />
+              <Bar dataKey="credito" name="Crédito" fill={C_CREDIT} radius={[3, 3, 0, 0]} />
+              <Bar dataKey="debito"  name="Débito"  fill={C_DEBIT}  radius={[3, 3, 0, 0]} />
             </BarChart>
           </ResponsiveContainer>
         </Card>
@@ -299,34 +302,6 @@ export default function AnalysisPage() {
           </li>
         </ul>
       </div>
-    </div>
-  )
-}
-
-// ---------------------------------------------------------------------------
-// TOOLTIP CUSTOMIZADO — gráfico de CFOP
-// ---------------------------------------------------------------------------
-
-interface TooltipEntry { value: number; name: string; color: string }
-
-function CfopTooltip({ active, payload, label }: {
-  active?: boolean; payload?: TooltipEntry[]; label?: string
-}) {
-  if (!active || !payload?.length) return null
-  return (
-    <div style={{
-      background: 'var(--color-surface)', border: '1px solid var(--color-border)',
-      borderRadius: '6px', padding: '10px 14px',
-      fontSize: '0.8rem', boxShadow: '0 4px 12px rgba(0,0,0,0.08)',
-    }}>
-      <p style={{ fontWeight: 700, marginBottom: '6px', color: 'var(--color-text-primary)' }}>
-        CFOP {label}
-      </p>
-      {payload.map((entry, i) => (
-        <p key={i} style={{ margin: '3px 0', color: entry.color }}>
-          {entry.name}: {formatBRL(entry.value)}
-        </p>
-      ))}
     </div>
   )
 }
