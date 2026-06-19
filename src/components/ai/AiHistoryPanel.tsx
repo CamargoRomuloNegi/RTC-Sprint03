@@ -6,7 +6,6 @@
 
 import { useState }    from 'react'
 import ReactMarkdown   from 'react-markdown'
-import remarkGfm       from 'remark-gfm'
 import { Clock, ChevronDown, ChevronUp, Trash2 } from 'lucide-react'
 import type { AiTurn } from '@/domain/models/AiTypes'
 
@@ -69,7 +68,7 @@ export function AiHistoryPanel({ history, onClear }: Props) {
           {expandedId === turn.id && (
             <div style={{ borderTop: '1px solid var(--color-border)', padding: '12px 14px' }}>
               <div className="ai-markdown" style={{ fontSize: '0.82rem' }}>
-                <ReactMarkdown remarkPlugins={[remarkGfm]}>{turn.answer}</ReactMarkdown>
+                <ReactMarkdown>{turn.answer}</ReactMarkdown>
               </div>
               <p style={{ fontSize: '0.68rem', color: 'var(--color-text-muted)', marginTop: '8px' }}>
                 {new Date(turn.timestamp).toLocaleString('pt-BR')} • {turn.model}

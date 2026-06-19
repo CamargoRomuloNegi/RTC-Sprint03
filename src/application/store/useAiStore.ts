@@ -30,10 +30,8 @@ interface AiStore extends AiSettings {
   error:     string | null
 
   // Ações — configurações
-  setModel:       (model: GeminiModel) => void
-  setMaxTokens:   (tokens: number) => void
-  setCompanyLogo: (logo: string | undefined) => void
-  setCompanyName: (name: string) => void
+  setModel:     (model: GeminiModel) => void
+  setMaxTokens: (tokens: number) => void
 
   // Ações — sessão
   addTurn:      (turn: AiTurn) => void
@@ -50,10 +48,8 @@ export const useAiStore = create<AiStore>()(
   persist(
     (set) => ({
       // Configurações (persistidas)
-      model:       DEFAULT_MODEL,
-      maxTokens:   DEFAULT_MAX_TOKENS,
-      companyLogo: undefined,
-      companyName: '',
+      model:     DEFAULT_MODEL,
+      maxTokens: DEFAULT_MAX_TOKENS,
 
       // Estado de sessão (não persistido, mas inicializado aqui)
       history:   [],
@@ -61,10 +57,8 @@ export const useAiStore = create<AiStore>()(
       error:     null,
 
       // Ações
-      setModel:       (model)       => set({ model }),
-      setMaxTokens:   (maxTokens)   => set({ maxTokens }),
-      setCompanyLogo: (companyLogo) => set({ companyLogo }),
-      setCompanyName: (companyName) => set({ companyName }),
+      setModel:     (model)     => set({ model }),
+      setMaxTokens: (maxTokens) => set({ maxTokens }),
 
       addTurn: (turn) =>
         set((state) => ({
@@ -79,10 +73,8 @@ export const useAiStore = create<AiStore>()(
       name:    'rtc_ai_settings',
       // Persistir APENAS as configurações operacionais — nunca dados de sessão
       partialize: (state) => ({
-        model:       state.model,
-        maxTokens:   state.maxTokens,
-        companyLogo: state.companyLogo,
-        companyName: state.companyName,
+        model:     state.model,
+        maxTokens: state.maxTokens,
       }),
       // Evita erro de hidratação SSR — componentes chamam rehydrate() em useEffect
       skipHydration: true,

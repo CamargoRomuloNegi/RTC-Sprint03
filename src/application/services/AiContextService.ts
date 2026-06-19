@@ -3,40 +3,46 @@
  * @description Constrói o AiContext a partir dos documentos fiscais carregados.
  *
  * GUARDIÃO DE PRIVACIDADE:
- *   Esta função NUNCA inclui no contexto:
+ *   Esta função é a fronteira entre dados fiscais e o que vai para a IA.
+ *   Ela NUNCA inclui no contexto:
  *     - CNPJs individuais
  *     - Nomes de empresas ou pessoas
  *     - Chaves de acesso de documentos
+ *     - Endereços ou qualquer dado pessoal
+ *
  *   Apenas estatísticas AGREGADAS são permitidas.
+ *   Qualquer alteração que adicione dados individuais deve ser revisada.
  *
- * ANÁLISE DE REGIME (Sprint 4 v4):
- *   Detecta automaticamente:
- *   1. Regime da empresa analisada (OUTBOUND = ela é emitente → CRT dela)
- *   2. Perfil de compras (INBOUND): fornecedores RPA com IBS/CBS vs. Simples sem
- *   3. Perfil de vendas (OUTBOUND): B2B (CNPJ) vs. B2C (CPF/consumidor anônimo)
- *
- * DESIGN: função pura — recebe documentos, retorna AiContext. Testável.
+ * DESIGN: função pura — recebe documentos, retorna AiContext.
+ * Sem acoplamento ao store Zustand — totalmente testável.
  */
 
-import type { FiscalDocument, TaxRegime } from '@/domain/models/FiscalDocument'
-import type { AiContext }                  from '@/domain/models/AiTypes'
-import { groupByPeriod }                   from './TaxAnalyzerService'
+import type { FiscalDocument }  from '@/domain/models/FiscalDocument'
+import type { AiContext }        from '@/domain/models/AiTypes'
+import { groupByPeriod }         from './TaxAnalyzerService'
 
 // ---------------------------------------------------------------------------
 // FUNÇÃO PRINCIPAL
 // ---------------------------------------------------------------------------
 
+/**
+ * Constrói o contexto que será enviado ao Gemini.
+ * Recebe documentos já enriquecidos (com direction e rtc_impact).
+ */
 export function buildAiContext(documents: FiscalDocument[]): AiContext {
-  if (documents.length === 0) return emptyContext()
+  if (documents.length === 0) {
+    return emptyContext()
+  }
 
-  // ── Volumes por direção ──────────────────────────────────────────────────
+  // --- Volumes por direção ---
   let inbound = 0, outbound = 0
   for (const doc of documents) {
     if (doc.direction === 'INBOUND')  inbound  += doc.total_value
     if (doc.direction === 'OUTBOUND') outbound += doc.total_value
   }
+  const total = inbound + outbound
 
-  // ── IBS/CBS ──────────────────────────────────────────────────────────────
+  // --- IBS/CBS ---
   let credito = 0, debito = 0
   for (const doc of documents) {
     for (const item of doc.items) {
@@ -47,7 +53,7 @@ export function buildAiContext(documents: FiscalDocument[]): AiContext {
   }
   const saldo = credito - debito
 
-  // ── Regime dos emitentes nos docs INBOUND (fornecedores) ─────────────────
+  // --- Regime ---
   const byRegime = { rpa: 0, simples: 0, mei: 0 }
   for (const doc of documents) {
     if (doc.tax_regime === 'RPA')              byRegime.rpa++
@@ -55,17 +61,7 @@ export function buildAiContext(documents: FiscalDocument[]): AiContext {
     if (doc.tax_regime === 'MEI')              byRegime.mei++
   }
 
-  // ── Regime da empresa ANALISADA ──────────────────────────────────────────
-  // Detectado nos documentos OUTBOUND (empresa = emitente → CRT é dela)
-  const companyRegime = detectCompanyRegime(documents)
-
-  // ── Perfil de compras (docs INBOUND) ────────────────────────────────────
-  const purchaseProfile = buildPurchaseProfile(documents)
-
-  // ── Perfil de vendas (docs OUTBOUND) ────────────────────────────────────
-  const salesProfile = buildSalesProfile(documents)
-
-  // ── Por tipo de documento ────────────────────────────────────────────────
+  // --- Por tipo de documento (sem dados individuais) ---
   const typeMap = new Map<string, { count: number; credito: number; debito: number }>()
   for (const doc of documents) {
     const key = doc.document_type
@@ -79,7 +75,7 @@ export function buildAiContext(documents: FiscalDocument[]): AiContext {
     typeMap.set(key, ex)
   }
 
-  // ── Top CFOPs ────────────────────────────────────────────────────────────
+  // --- Top CFOPs (dados públicos SEFAZ) ---
   const cfopMap = new Map<string, { credito: number; debito: number }>()
   for (const doc of documents) {
     for (const item of doc.items) {
@@ -97,7 +93,7 @@ export function buildAiContext(documents: FiscalDocument[]): AiContext {
     .sort((a, b) => (b.credito + b.debito) - (a.credito + a.debito))
     .slice(0, 8)
 
-  // ── Inconformidades ──────────────────────────────────────────────────────
+  // --- Inconformidades ---
   const inconformes = documents.filter(doc =>
     doc.tax_regime === 'RPA' &&
     doc.direction  === 'INBOUND' &&
@@ -105,11 +101,11 @@ export function buildAiContext(documents: FiscalDocument[]): AiContext {
     (doc.totals.vIBS ?? 0) + (doc.totals.vCBS ?? 0) === 0
   ).length
 
-  // ── Período ──────────────────────────────────────────────────────────────
+  // --- Período (datas mínima e máxima — sem identificação de empresa) ---
   const period = extractPeriod(documents)
 
-  // ── Resumo temporal ──────────────────────────────────────────────────────
-  const temporal = groupByPeriod(documents, 'monthly')
+  // --- Resumo temporal mensal (max 12 meses) ---
+  const temporalData = groupByPeriod(documents, 'monthly')
     .filter(p => p.key !== 'sem-data')
     .slice(-12)
     .map(p => ({ label: p.label, credito: p.credito, debito: p.debito, saldo: p.saldo }))
@@ -120,7 +116,7 @@ export function buildAiContext(documents: FiscalDocument[]): AiContext {
     volumes: {
       inbound:  round2(inbound),
       outbound: round2(outbound),
-      total:    round2(inbound + outbound),
+      total:    round2(total),
     },
     ibscbs: {
       credito:     round2(credito),
@@ -130,110 +126,11 @@ export function buildAiContext(documents: FiscalDocument[]): AiContext {
       debitRate:   outbound > 0 ? round2((debito  / outbound) * 100) : 0,
       balanceRate: outbound > 0 ? round2((saldo   / outbound) * 100) : 0,
     },
-    byDocType:       Array.from(typeMap.entries()).map(([tipo, v]) => ({ tipo, ...v })),
+    byDocType: Array.from(typeMap.entries()).map(([tipo, v]) => ({ tipo, ...v })),
     byRegime,
     inconformes,
     topCfops,
-    temporal,
-    companyRegime,
-    purchaseProfile,
-    salesProfile,
-  }
-}
-
-// ---------------------------------------------------------------------------
-// DETECÇÃO DO REGIME DA EMPRESA ANALISADA
-// ---------------------------------------------------------------------------
-
-/**
- * Detecta o regime da empresa analisada olhando os docs OUTBOUND
- * (onde ela é emitente — o CRT é o dela).
- * Se não houver OUTBOUND, infere pelos INBOUND com lógica inversa.
- */
-function detectCompanyRegime(documents: FiscalDocument[]): AiContext['companyRegime'] {
-  const outbound = documents.filter(d => d.direction === 'OUTBOUND')
-  if (outbound.length === 0) return 'UNKNOWN'
-
-  let rpa = 0, simples = 0, mei = 0
-  for (const doc of outbound) {
-    if (doc.tax_regime === 'RPA')              rpa++
-    if (doc.tax_regime === 'SIMPLES_NACIONAL') simples++
-    if (doc.tax_regime === 'MEI')              mei++
-  }
-
-  if (rpa === 0 && simples === 0 && mei === 0) return 'UNKNOWN'
-  if (rpa >= simples && rpa >= mei)              return 'RPA'
-  if (simples >= rpa  && simples >= mei)         return 'SIMPLES_NACIONAL'
-  return 'MEI'
-}
-
-// ---------------------------------------------------------------------------
-// PERFIL DE COMPRAS
-// ---------------------------------------------------------------------------
-
-/**
- * Analisa os docs INBOUND para entender quantos fornecedores têm IBS/CBS.
- * - withCredits: fornecedores RPA que destacam IBS/CBS (aproveitável)
- * - neutral:     fornecedores Simples/MEI sem IBS/CBS (não gera crédito)
- */
-function buildPurchaseProfile(documents: FiscalDocument[]): AiContext['purchaseProfile'] {
-  const inbound = documents.filter(d => d.direction === 'INBOUND')
-  if (inbound.length === 0) {
-    return { withCredits: 0, neutral: 0, creditCoverageRate: 0 }
-  }
-
-  let withCredits     = 0
-  let neutral         = 0
-  let valueWithCred   = 0
-  let valueTotalInb   = 0
-
-  for (const doc of inbound) {
-    const hasIbs = (doc.totals.vIBS ?? 0) + (doc.totals.vCBS ?? 0) > 0
-    valueTotalInb += doc.total_value
-    if (hasIbs) {
-      withCredits++
-      valueWithCred += doc.total_value
-    } else {
-      neutral++
-    }
-  }
-
-  return {
-    withCredits,
-    neutral,
-    creditCoverageRate: valueTotalInb > 0
-      ? round2((valueWithCred / valueTotalInb) * 100)
-      : 0,
-  }
-}
-
-// ---------------------------------------------------------------------------
-// PERFIL DE VENDAS
-// ---------------------------------------------------------------------------
-
-/**
- * Analisa os docs OUTBOUND para identificar B2B vs B2C.
- * B2B: receiver é CNPJ (14 dígitos) — empresa que pode querer crédito
- * B2C: receiver é CPF, 'CONSUMIDOR_FINAL' ou anônimo — não aplica crédito
- */
-function buildSalesProfile(documents: FiscalDocument[]): AiContext['salesProfile'] {
-  const outbound = documents.filter(d => d.direction === 'OUTBOUND')
-  if (outbound.length === 0) {
-    return { b2b: 0, b2c: 0, b2bRate: 0 }
-  }
-
-  let b2b = 0, b2c = 0
-  for (const doc of outbound) {
-    const rcv   = doc.receiver.cnpj_cpf.replace(/\D/g, '')
-    const isCnpj = rcv.length === 14
-    if (isCnpj) b2b++
-    else        b2c++ // CPF (11 dígitos) ou CONSUMIDOR_FINAL
-  }
-
-  return {
-    b2b,
-    b2c,
-    b2bRate: round2((b2b / outbound.length) * 100),
+    temporal: temporalData,
   }
 }
 
@@ -241,6 +138,10 @@ function buildSalesProfile(documents: FiscalDocument[]): AiContext['salesProfile
 // VERIFICAÇÃO DE PRIVACIDADE (uso em testes)
 // ---------------------------------------------------------------------------
 
+/**
+ * Verifica se o contexto contém dados que não deveriam ser enviados.
+ * Retorna lista de violações (vazia se seguro).
+ */
 export function auditContextPrivacy(
   context: AiContext,
   documents: FiscalDocument[],
@@ -248,16 +149,19 @@ export function auditContextPrivacy(
   const violations: string[] = []
   const contextStr = JSON.stringify(context)
 
+  // Verificar se algum CNPJ individual aparece no contexto
   for (const doc of documents) {
     const cnpj = doc.issuer.cnpj_cpf.replace(/\D/g, '')
     if (cnpj.length >= 8 && contextStr.includes(cnpj)) {
-      violations.push(`CNPJ encontrado: ${cnpj.slice(0, 4)}****`)
+      violations.push(`CNPJ encontrado no contexto: ${cnpj.slice(0, 4)}****`)
     }
+    // Verificar nome do emitente
     const name = doc.issuer.name
-    if (name && name.length > 4 && name !== 'EMPRESA ANONIMA LTDA' && contextStr.includes(name)) {
-      violations.push(`Nome encontrado: ${name.slice(0, 8)}…`)
+    if (name && name.length > 4 && contextStr.includes(name)) {
+      violations.push(`Nome de empresa encontrado: ${name.slice(0, 8)}...`)
     }
   }
+
   return violations
 }
 
@@ -273,24 +177,26 @@ function emptyContext(): AiContext {
     ibscbs:    { credito: 0, debito: 0, saldo: 0, creditRate: 0, debitRate: 0, balanceRate: 0 },
     byDocType: [],
     byRegime:  { rpa: 0, simples: 0, mei: 0 },
-    inconformes:     0,
-    topCfops:        [],
-    temporal:        [],
-    companyRegime:   'UNKNOWN',
-    purchaseProfile: { withCredits: 0, neutral: 0, creditCoverageRate: 0 },
-    salesProfile:    { b2b: 0, b2c: 0, b2bRate: 0 },
+    inconformes: 0,
+    topCfops:  [],
+    temporal:  [],
   }
 }
 
 function extractPeriod(documents: FiscalDocument[]): string {
   const dates = documents
-    .map(d => d.issue_date).filter(Boolean)
-    .map(d => new Date(d)).filter(d => !isNaN(d.getTime()))
+    .map(d => d.issue_date)
+    .filter(Boolean)
+    .map(d => new Date(d))
+    .filter(d => !isNaN(d.getTime()))
     .sort((a, b) => a.getTime() - b.getTime())
+
   if (dates.length === 0) return 'Período não identificado'
-  const fmt   = (d: Date) => d.toLocaleDateString('pt-BR', { month: 'short', year: '2-digit' })
+
+  const fmt = (d: Date) => d.toLocaleDateString('pt-BR', { month: 'short', year: '2-digit' })
   const first = dates[0]!
   const last  = dates[dates.length - 1]!
+
   return first.getMonth() === last.getMonth() && first.getFullYear() === last.getFullYear()
     ? fmt(first)
     : `${fmt(first)} – ${fmt(last)}`
