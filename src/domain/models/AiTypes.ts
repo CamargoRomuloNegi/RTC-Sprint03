@@ -126,6 +126,32 @@ export interface AiContext {
     debito:  number
     saldo:   number
   }>
+
+  // ── ANÁLISE DE REGIME (Sprint 4 v4) ──────────────────────────────────────
+  // Estes campos permitem ao prompt adaptar a análise ao perfil real da empresa.
+
+  /** Regime tributário da empresa ANALISADA (detectado nos docs OUTBOUND) */
+  companyRegime: 'RPA' | 'SIMPLES_NACIONAL' | 'MEI' | 'UNKNOWN'
+
+  /** Perfil das compras (docs INBOUND): quais fornecedores têm IBS/CBS */
+  purchaseProfile: {
+    /** Docs de fornecedores RPA com IBS/CBS destacado (créditos aproveitáveis) */
+    withCredits:       number
+    /** Docs de fornecedores Simples/MEI — sem crédito de IBS/CBS */
+    neutral:           number
+    /** % do valor das entradas coberto por fornecedores com IBS/CBS */
+    creditCoverageRate: number
+  }
+
+  /** Perfil das vendas (docs OUTBOUND): B2B vs B2C */
+  salesProfile: {
+    /** Docs para CNPJ (empresas) — B2B: cliente pode querer tomar crédito */
+    b2b:     number
+    /** Docs para CPF / consumidor anônimo — B2C: crédito não é relevante ao cliente */
+    b2c:     number
+    /** Percentual de saídas para empresas (B2B) */
+    b2bRate: number
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -148,6 +174,11 @@ export interface AiTurn {
 export interface AiSettings {
   model:     GeminiModel
   maxTokens: number
+  /** Logo da empresa em base64 (data URL) — exibida no cabeçalho do dossiê exportado.
+   *  Armazenada em localStorage como preferência visual, sem dados fiscais. */
+  companyLogo?: string
+  /** Nome da empresa para exibição no cabeçalho do dossiê */
+  companyName?: string
 }
 
 // ---------------------------------------------------------------------------

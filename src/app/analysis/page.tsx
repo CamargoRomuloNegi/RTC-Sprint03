@@ -44,14 +44,13 @@ export default function AnalysisPage() {
   const summary = useMemo(() => calculateApuracao(documents), [documents])
 
   // --- Volumes financeiros por direção (base dos índices percentuais) ---
-  const { inboundValue, outboundValue, totalValue } = useMemo(() => {
-    let inbound = 0, outbound = 0, total = 0
+  const { inboundValue, outboundValue } = useMemo(() => {
+    let inbound = 0, outbound = 0
     for (const doc of documents) {
-      total += doc.total_value
       if (doc.direction === 'INBOUND')  inbound  += doc.total_value
       if (doc.direction === 'OUTBOUND') outbound += doc.total_value
     }
-    return { inboundValue: inbound, outboundValue: outbound, totalValue: total }
+    return { inboundValue: inbound, outboundValue: outbound }
   }, [documents])
 
   /**
@@ -73,7 +72,7 @@ export default function AnalysisPage() {
    *   Saldo líquido ÷ volume total de todos os documentos
    *   Representa o peso da posição credora/devedora sobre o volume transacionado
    */
-  const balanceRate = totalValue    > 0 ? (Math.abs(summary.saldo) / totalValue)          * 100 : 0
+  const balanceRate = outboundValue > 0 ? (Math.abs(summary.saldo) / outboundValue)       * 100 : 0
 
   const saldoPositivo = summary.saldo >= 0
 
@@ -181,11 +180,11 @@ export default function AnalysisPage() {
           value={formatBRL(Math.abs(summary.saldo))}
           sub={saldoPositivo ? '▲ Posição Credora' : '▼ Posição Devedora'}
           rate={balanceRate}
-          rateLabel={`${formatPercent(balanceRate)} do volume total`}
-          rateTitle="Índice de Saldo = |saldo líquido| ÷ volume total transacionado"
+          rateLabel={`${formatPercent(balanceRate)} do valor das saídas`}
+          rateTitle="Índice de Saldo = |saldo líquido| ÷ total das vendas (OUTBOUND) — para cada R$ vendido, quanto é posição credora/devedora de IBS/CBS"
           color={saldoPositivo ? C_CREDIT : C_DEBIT}
-          baseLabel="Volume total"
-          baseValue={formatBRL(totalValue)}
+          baseLabel="Base: saídas"
+          baseValue={formatBRL(outboundValue)}
         />
       </div>
 
@@ -217,13 +216,10 @@ export default function AnalysisPage() {
               <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
               <XAxis dataKey="cfop" tick={{ fontSize: 11, fill: 'var(--color-text-muted)' }} />
               <YAxis tick={{ fontSize: 11, fill: 'var(--color-text-muted)' }} tickFormatter={v => formatBRL(v).replace('R$\u00a0', '')} />
-              <Tooltip
-                formatter={(v, n) => [formatBRL(Number(v)), n === 'credito' ? 'Crédito' : 'Débito'] as [string, string]}
-                contentStyle={{ fontSize: '0.8rem', border: '1px solid var(--color-border)', borderRadius: '6px' }}
-              />
+              <Tooltip content={<CfopTooltip />} />
               <Legend wrapperStyle={{ fontSize: '0.8rem' }} />
-              <Bar dataKey="credito" name="Crédito" fill={C_CREDIT} radius={[3, 3, 0, 0]} />
-              <Bar dataKey="debito"  name="Débito"  fill={C_DEBIT}  radius={[3, 3, 0, 0]} />
+              <Bar dataKey="credito" name="Crédito" fill={C_CREDIT} radius={[3, 3, 0, 0]} maxBarSize={28} />
+              <Bar dataKey="debito"  name="Débito"  fill={C_DEBIT}  radius={[3, 3, 0, 0]} maxBarSize={28} />
             </BarChart>
           </ResponsiveContainer>
         </Card>
@@ -297,11 +293,40 @@ export default function AnalysisPage() {
           <li>CFOPs de remessa, bonificação e exportação são classificados como NEUTROS.</li>
           <li>Emitentes Simples Nacional não destacam IBS/CBS — não geram crédito para o adquirente.</li>
           <li>
-            <strong>Índice % de Crédito</strong>: IBS/CBS creditados ÷ total de compras (INBOUND).
-            <strong> Índice % de Débito</strong>: IBS/CBS debitados ÷ total de vendas (OUTBOUND).
+            <strong>Índice % de Crédito</strong>: IBS/CBS creditados ÷ total das compras (INBOUND).
+            <strong> Índice % de Débito</strong>: IBS/CBS debitados ÷ total das vendas (OUTBOUND).
+            <strong> Índice % de Saldo</strong>: saldo líquido ÷ total das vendas (OUTBOUND) — peso real do IBS/CBS sobre cada R$ vendido.
           </li>
         </ul>
       </div>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// TOOLTIP CUSTOMIZADO — gráfico de CFOP
+// ---------------------------------------------------------------------------
+
+interface TooltipEntry { value: number; name: string; color: string }
+
+function CfopTooltip({ active, payload, label }: {
+  active?: boolean; payload?: TooltipEntry[]; label?: string
+}) {
+  if (!active || !payload?.length) return null
+  return (
+    <div style={{
+      background: 'var(--color-surface)', border: '1px solid var(--color-border)',
+      borderRadius: '6px', padding: '10px 14px',
+      fontSize: '0.8rem', boxShadow: '0 4px 12px rgba(0,0,0,0.08)',
+    }}>
+      <p style={{ fontWeight: 700, marginBottom: '6px', color: 'var(--color-text-primary)' }}>
+        CFOP {label}
+      </p>
+      {payload.map((entry, i) => (
+        <p key={i} style={{ margin: '3px 0', color: entry.color }}>
+          {entry.name}: {formatBRL(entry.value)}
+        </p>
+      ))}
     </div>
   )
 }

@@ -1,54 +1,77 @@
 /**
- * @file settings/page.tsx  (rota "/settings")
- * @description Configurações do Módulo de IA — modelo, limites e status.
+ * @file settings/page.tsx (rota "/settings")
+ * @description Configurações do Módulo de IA — modelo, logo da empresa e status.
  */
 'use client'
 
-import { useEffect, useState }  from 'react'
-import { Bot, CheckCircle, XCircle, AlertTriangle, Info } from 'lucide-react'
-import { useAiStore }            from '@/application/store/useAiStore'
-import { GEMINI_MODELS }         from '@/domain/models/AiTypes'
-import type { GeminiModel }      from '@/domain/models/AiTypes'
-import { Card }                  from '@/components/ui/Card'
-
-const TOKEN_OPTIONS = [512, 1024, 2048, 4096] as const
+import { useEffect, useState, useRef } from 'react'
+import {
+  Bot, CheckCircle, XCircle, AlertTriangle,
+  Info, Upload, X, Building2,
+} from 'lucide-react'
+import { useAiStore }        from '@/application/store/useAiStore'
+import { GEMINI_MODELS }     from '@/domain/models/AiTypes'
+import type { GeminiModel }  from '@/domain/models/AiTypes'
+import { Card }              from '@/components/ui/Card'
 
 export default function SettingsPage() {
-  const { model, maxTokens, setModel, setMaxTokens } = useAiStore()
+  const {
+    model, setModel,
+    companyLogo, setCompanyLogo,
+    companyName, setCompanyName,
+  } = useAiStore()
+
   const [apiConfigured, setApiConfigured] = useState<boolean | null>(null)
   const [checkingApi,   setCheckingApi]   = useState(true)
+  const [logoError,     setLogoError]     = useState('')
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
-  // Reidratar o store (skipHydration: true requer este passo)
+  // Reidratar store (skipHydration)
   useEffect(() => {
     useAiStore.persist.rehydrate()
   }, [])
 
   // Verificar status da chave no servidor
   useEffect(() => {
-    const check = async () => {
-      try {
-        const res  = await fetch('/api/ai/status')
-        const data = await res.json() as { configured: boolean }
-        setApiConfigured(data.configured)
-      } catch {
-        setApiConfigured(false)
-      } finally {
-        setCheckingApi(false)
-      }
-    }
-    check()
+    fetch('/api/ai/status')
+      .then(r => r.json())
+      .then((d: { configured: boolean }) => setApiConfigured(d.configured))
+      .catch(() => setApiConfigured(false))
+      .finally(() => setCheckingApi(false))
   }, [])
+
+  // Upload de logo — converte para base64, valida tamanho e tipo
+  const handleLogoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setLogoError('')
+
+    if (!file.type.startsWith('image/')) {
+      setLogoError('Apenas imagens são aceitas (PNG, JPG, SVG).')
+      return
+    }
+    if (file.size > 500_000) {
+      setLogoError('Imagem muito grande. Use até 500KB.')
+      return
+    }
+
+    const reader = new FileReader()
+    reader.onload = (ev) => {
+      const result = ev.target?.result
+      if (typeof result === 'string') setCompanyLogo(result)
+    }
+    reader.readAsDataURL(file)
+  }
 
   return (
     <div style={{ maxWidth: '680px', display: 'flex', flexDirection: 'column', gap: '20px' }}>
 
-      {/* Título */}
       <div>
         <h1 style={{ fontSize: '1.25rem', fontWeight: 700, color: 'var(--color-text-primary)', marginBottom: '4px' }}>
           Configurações
         </h1>
         <p style={{ fontSize: '0.85rem', color: 'var(--color-text-muted)' }}>
-          Parâmetros operacionais do Módulo de IA
+          Parâmetros operacionais do Módulo de IA e identidade do dossiê
         </p>
       </div>
 
@@ -58,15 +81,13 @@ export default function SettingsPage() {
           {checkingApi ? (
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
               <div style={{ width: 16, height: 16, borderRadius: '50%', background: 'var(--color-border)', animation: 'spin 1s linear infinite' }} />
-              <span style={{ fontSize: '0.85rem', color: 'var(--color-text-muted)' }}>Verificando configuração…</span>
+              <span style={{ fontSize: '0.85rem', color: 'var(--color-text-muted)' }}>Verificando…</span>
             </div>
           ) : apiConfigured ? (
             <>
               <CheckCircle size={20} color="var(--color-valid)" />
               <div>
-                <p style={{ fontSize: '0.88rem', fontWeight: 600, color: 'var(--color-valid)' }}>
-                  Chave Gemini configurada
-                </p>
+                <p style={{ fontSize: '0.88rem', fontWeight: 600, color: 'var(--color-valid)' }}>Chave Gemini configurada</p>
                 <p style={{ fontSize: '0.78rem', color: 'var(--color-text-muted)', marginTop: '2px' }}>
                   GEMINI_API_KEY detectada nas variáveis de ambiente do servidor
                 </p>
@@ -76,18 +97,11 @@ export default function SettingsPage() {
             <>
               <XCircle size={20} color="var(--color-error)" />
               <div>
-                <p style={{ fontSize: '0.88rem', fontWeight: 600, color: 'var(--color-error)' }}>
-                  Chave Gemini não configurada
-                </p>
+                <p style={{ fontSize: '0.88rem', fontWeight: 600, color: 'var(--color-error)' }}>Chave não configurada</p>
                 <p style={{ fontSize: '0.78rem', color: 'var(--color-text-muted)', marginTop: '2px' }}>
-                  O operador deve adicionar <code style={{ fontFamily: 'var(--font-data)', background: 'var(--color-bg)', padding: '1px 4px', borderRadius: '3px' }}>GEMINI_API_KEY</code> nas variáveis de ambiente do Vercel.
-                </p>
-                <p style={{ fontSize: '0.78rem', color: 'var(--color-text-muted)', marginTop: '4px' }}>
-                  Obtenha uma chave gratuita em:{' '}
-                  <a href="https://aistudio.google.com" target="_blank" rel="noopener noreferrer"
-                    style={{ color: 'var(--color-primary)', textDecoration: 'none' }}>
-                    aistudio.google.com
-                  </a>
+                  Adicione <code style={{ fontFamily: 'var(--font-data)', background: 'var(--color-bg)', padding: '1px 4px', borderRadius: '3px' }}>GEMINI_API_KEY</code> nas variáveis do Vercel.{' '}
+                  Chave gratuita em{' '}
+                  <a href="https://aistudio.google.com" target="_blank" rel="noopener noreferrer" style={{ color: 'var(--color-primary)' }}>aistudio.google.com</a>
                 </p>
               </div>
             </>
@@ -95,8 +109,115 @@ export default function SettingsPage() {
         </div>
       </Card>
 
-      {/* Seleção de Modelo */}
-      <Card title="Modelo de IA" subtitle="Selecione o modelo Gemini a ser utilizado">
+      {/* Identidade do Dossiê */}
+      <Card title="Identidade do Dossiê" subtitle="Logo e nome exibidos no cabeçalho do relatório exportado">
+
+        {/* Nome da empresa */}
+        <div style={{ marginBottom: '20px' }}>
+          <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: 600, color: 'var(--color-text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '6px' }}>
+            Nome da Empresa / Escritório
+          </label>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <Building2 size={15} style={{ color: 'var(--color-text-muted)', flexShrink: 0 }} />
+            <input
+              type="text"
+              value={companyName ?? ''}
+              onChange={e => setCompanyName(e.target.value)}
+              placeholder="Ex: Escritório Silva & Associados ou Nome da Empresa"
+              maxLength={80}
+              style={{
+                flex: 1, height: '36px', padding: '0 12px',
+                border: '1px solid var(--color-border)', borderRadius: 'var(--radius-sm)',
+                fontSize: '0.85rem', fontFamily: 'var(--font-ui)',
+                color: 'var(--color-text-primary)', background: 'var(--color-bg)',
+              }}
+            />
+          </div>
+          <p style={{ fontSize: '0.72rem', color: 'var(--color-text-muted)', marginTop: '4px' }}>
+            Aparece no cabeçalho do dossiê como "Preparado por"
+          </p>
+        </div>
+
+        {/* Upload de logo */}
+        <div>
+          <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: 600, color: 'var(--color-text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '8px' }}>
+            Logotipo
+          </label>
+
+          {companyLogo ? (
+            /* Preview da logo carregada */
+            <div style={{ display: 'flex', alignItems: 'center', gap: '16px', padding: '14px 16px', background: 'var(--color-bg)', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-md)' }}>
+              <img
+                src={companyLogo}
+                alt="Logo da empresa"
+                style={{ maxHeight: '48px', maxWidth: '180px', objectFit: 'contain' }}
+              />
+              <div style={{ flex: 1 }}>
+                <p style={{ fontSize: '0.82rem', fontWeight: 500, color: 'var(--color-text-primary)', marginBottom: '2px' }}>Logo carregada</p>
+                <p style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>
+                  Será exibida no cabeçalho do dossiê exportado
+                </p>
+              </div>
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <button
+                  onClick={() => fileInputRef.current?.click()}
+                  style={{ padding: '5px 10px', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-sm)', background: 'var(--color-surface)', cursor: 'pointer', fontSize: '0.75rem', color: 'var(--color-text-secondary)' }}
+                >
+                  Trocar
+                </button>
+                <button
+                  onClick={() => { setCompanyLogo(undefined); setLogoError('') }}
+                  style={{ padding: '5px 8px', border: '1px solid #fecaca', borderRadius: 'var(--radius-sm)', background: '#fef2f2', cursor: 'pointer', color: 'var(--color-error)' }}
+                >
+                  <X size={13} />
+                </button>
+              </div>
+            </div>
+          ) : (
+            /* Área de upload */
+            <div
+              onClick={() => fileInputRef.current?.click()}
+              style={{
+                display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+                padding: '24px', border: '2px dashed var(--color-border)', borderRadius: 'var(--radius-md)',
+                cursor: 'pointer', background: 'var(--color-bg)', transition: 'all 0.15s', gap: '8px',
+              }}
+              onMouseEnter={e => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
+              onMouseLeave={e => (e.currentTarget.style.borderColor = 'var(--color-border)')}
+            >
+              <Upload size={22} style={{ color: 'var(--color-text-muted)' }} />
+              <p style={{ fontSize: '0.85rem', fontWeight: 500, color: 'var(--color-text-secondary)' }}>
+                Clique para carregar o logotipo
+              </p>
+              <p style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>
+                PNG, JPG ou SVG — até 500KB
+              </p>
+            </div>
+          )}
+
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*"
+            style={{ display: 'none' }}
+            onChange={handleLogoUpload}
+          />
+
+          {logoError && (
+            <p style={{ fontSize: '0.78rem', color: 'var(--color-error)', marginTop: '6px' }}>{logoError}</p>
+          )}
+
+          <div style={{ display: 'flex', gap: '6px', marginTop: '10px', padding: '8px 12px', background: 'var(--color-bg)', borderRadius: 'var(--radius-sm)', border: '1px solid var(--color-border)' }}>
+            <Info size={13} style={{ color: 'var(--color-text-muted)', flexShrink: 0, marginTop: '1px' }} />
+            <p style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', lineHeight: 1.5 }}>
+              O logo é armazenado apenas no navegador (localStorage). Nenhuma imagem é enviada ao servidor ou ao Gemini.
+            </p>
+          </div>
+        </div>
+      </Card>
+
+      {/* Modelo de IA */}
+      <Card title="Modelo de IA" subtitle="Selecione o modelo Gemini para geração do dossiê">
         <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
           {(Object.values(GEMINI_MODELS) as typeof GEMINI_MODELS[GeminiModel][]).map(m => (
             <label
@@ -110,9 +231,7 @@ export default function SettingsPage() {
               }}
             >
               <input
-                type="radio"
-                name="model"
-                value={m.id}
+                type="radio" name="model" value={m.id}
                 checked={model === m.id}
                 onChange={() => setModel(m.id)}
                 style={{ marginTop: '2px', flexShrink: 0 }}
@@ -136,62 +255,32 @@ export default function SettingsPage() {
             </label>
           ))}
         </div>
-      </Card>
 
-      {/* Limite de Tokens */}
-      <Card title="Limite de Resposta" subtitle="Máximo de tokens de saída por consulta">
-        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-          {TOKEN_OPTIONS.map(t => (
-            <button
-              key={t}
-              onClick={() => setMaxTokens(t)}
-              style={{
-                padding: '8px 18px', borderRadius: 'var(--radius-sm)',
-                border: `2px solid ${maxTokens === t ? 'var(--color-primary)' : 'var(--color-border)'}`,
-                background: maxTokens === t ? 'var(--color-primary)' : 'var(--color-surface)',
-                color: maxTokens === t ? '#fff' : 'var(--color-text-primary)',
-                cursor: 'pointer', fontFamily: 'var(--font-data)',
-                fontSize: '0.88rem', fontWeight: 600, transition: 'all 0.15s',
-              }}
-            >
-              {t.toLocaleString()}
-            </button>
-          ))}
-        </div>
-        <div style={{ display: 'flex', alignItems: 'flex-start', gap: '8px', marginTop: '14px', padding: '10px 12px', background: 'var(--color-bg)', borderRadius: 'var(--radius-sm)' }}>
+        {/* Nota sobre tokens */}
+        <div style={{ display: 'flex', gap: '8px', marginTop: '14px', padding: '10px 12px', background: 'var(--color-bg)', borderRadius: 'var(--radius-sm)' }}>
           <Info size={13} style={{ color: 'var(--color-text-muted)', flexShrink: 0, marginTop: '1px' }} />
           <p style={{ fontSize: '0.77rem', color: 'var(--color-text-muted)', lineHeight: 1.5 }}>
-            <strong>1024 tokens</strong> (~750 palavras) é suficiente para análises fiscais detalhadas.
-            Valores maiores consomem mais da cota gratuita por consulta.
+            O dossiê usa o máximo de tokens que o modelo suporta para garantir completude.
+            O Free Tier limita <strong>15 requisições/minuto</strong> — não o tamanho de cada resposta.
           </p>
         </div>
       </Card>
 
-      {/* Aviso de privacidade — permanente */}
-      <div style={{
-        display: 'flex', gap: '12px', alignItems: 'flex-start',
-        background: '#fffbeb', border: '1px solid #fde68a',
-        borderRadius: 'var(--radius-lg)', padding: '16px 18px',
-      }}>
+      {/* Aviso de privacidade */}
+      <div style={{ display: 'flex', gap: '12px', alignItems: 'flex-start', background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 'var(--radius-lg)', padding: '16px 18px' }}>
         <AlertTriangle size={18} style={{ color: 'var(--color-warn)', flexShrink: 0, marginTop: '1px' }} />
         <div>
           <p style={{ fontSize: '0.85rem', fontWeight: 700, color: '#92400e', marginBottom: '6px' }}>
             Aviso de Privacidade — Módulo de IA
           </p>
           <p style={{ fontSize: '0.8rem', color: '#78350f', lineHeight: 1.6 }}>
-            Ao usar o módulo de IA, um <strong>sumário estatístico</strong> da sua apuração é enviado ao Google Gemini para processamento.
-            No plano gratuito (Free Tier), o Google pode usar esses dados para melhorar seus modelos.
+            Ao gerar o dossiê, um <strong>sumário estatístico</strong> é enviado ao Google Gemini.
+            <strong> O que é enviado:</strong> totais agregados, percentuais, CFOPs.
+            <strong> O que NÃO é enviado:</strong> CNPJs, nomes de empresas, chaves ou documentos individuais.
           </p>
-          <p style={{ fontSize: '0.8rem', color: '#78350f', lineHeight: 1.6, marginTop: '6px' }}>
-            <strong>O que é enviado:</strong> totais agregados, percentuais, distribuição por tipo e CFOPs.<br />
-            <strong>O que NÃO é enviado:</strong> CNPJs, nomes de empresas, chaves de acesso ou qualquer dado individual.
-          </p>
-          <p style={{ fontSize: '0.78rem', color: '#92400e', marginTop: '8px' }}>
-            Para uso com dados confidenciais, utilize uma chave do plano pago no{' '}
-            <a href="https://aistudio.google.com" target="_blank" rel="noopener noreferrer"
-              style={{ color: '#b45309', fontWeight: 600 }}>
-              Google AI Studio
-            </a>.
+          <p style={{ fontSize: '0.78rem', color: '#92400e', marginTop: '6px' }}>
+            No plano gratuito, o Google pode usar dados para melhorar seus modelos. Para dados confidenciais, use uma chave do plano pago em{' '}
+            <a href="https://aistudio.google.com" target="_blank" rel="noopener noreferrer" style={{ color: '#b45309', fontWeight: 600 }}>aistudio.google.com</a>.
           </p>
         </div>
       </div>

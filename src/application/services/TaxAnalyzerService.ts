@@ -278,6 +278,10 @@ export interface PeriodData {
   docsComIBS:    number
   /** Volume financeiro total (soma de total_value) */
   totalValue:    number
+  /** Volume financeiro de documentos de ENTRADA (INBOUND) — base do índice de crédito */
+  inboundValue:  number
+  /** Volume financeiro de documentos de SAÍDA (OUTBOUND) — base dos índices de débito e saldo */
+  outboundValue: number
   /** IBS/CBS creditados no período */
   credito:       number
   /** IBS/CBS debitados no período */
@@ -313,11 +317,14 @@ export function groupByPeriod(
     const existing = map.get(key) ?? {
       key, label,
       docCount: 0, docsComIBS: 0,
-      totalValue: 0, credito: 0, debito: 0, saldo: 0,
+      totalValue: 0, inboundValue: 0, outboundValue: 0,
+      credito: 0, debito: 0, saldo: 0,
     }
 
     existing.docCount++
     existing.totalValue += doc.total_value
+    if (doc.direction === 'INBOUND')  existing.inboundValue  += doc.total_value
+    if (doc.direction === 'OUTBOUND') existing.outboundValue += doc.total_value
 
     const docIBS = (doc.totals.vIBS ?? 0) + (doc.totals.vCBS ?? 0)
     if (docIBS > 0) existing.docsComIBS++
